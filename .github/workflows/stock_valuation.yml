@@ -1,0 +1,74 @@
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import requests
+import schedule
+import time
+import os
+from twilio.rest import Client
+from datetime import datetime
+
+# 🔹 Enter your details
+gmail_webhook = "YOUR_GOOGLE_APPS_SCRIPT_WEBHOOK"  # Replace with your Google Apps Script Webhook
+twilio_sid = os.getenv("TWILIO_SID")
+twilio_auth = os.getenv("TWILIO_AUTH")
+whatsapp_number = "whatsapp:+918903115873"  # Replace with your WhatsApp number
+
+# 🔹 List of Stocks to Track
+stocks = ["NVDA", "TSLA", "AAPL", "COST"]
+
+# 🔹 Function to Fetch Stock Data & Perform Valuation
+def fetch_and_analyze_stock(stock):
+    print(f"\n🔍 Fetching Data for {stock}...")
+    data = yf.Ticker(stock)
+
+    try:
+        current_price = data.history(period="1d")['Close'].iloc[-1]
+        market_cap = data.info.get("marketCap", "N/A")
+        pe_ratio = data.info.get("trailingPE", "N/A")
+        roe = data.info.get("returnOnEquity", "N/A")
+        ev_ebitda = data.info.get("enterpriseToEbitda", "N/A")
+    except Exception as e:
+        print(f"⚠️ Error fetching data for {stock}: {e}")
+        return  # Skip this stock if there's an error
+
+    # Fetch Past 1-Year Stock Prices
+    hist = data.history(period="1y")['Close']
+    
+    # Generate Trend Graph
+    plt.figure(figsize=(10, 5))
+    sns.lineplot(x=hist.index, y=hist.values, label=f"{stock} Price Trend", color="blue")
+    plt.xlabel("Date")
+    plt.ylabel("Stock Price ($)")
+    plt.title(f"{stock} Stock Price Trend (1 Year)")
+    plt.legend()
+    plt.savefig(f"{stock}_trend.png")  
+    plt.close()
+
+    # Buy/Sell Decision Based on P/E Ratio
+    decision = "📢 BUY: Undervalued!" if pe_ratio < 15 else "🚨 SELL: Overvalued!" if pe_ratio > 25 else "✅ HOLD: Fair Price"
+
+    # 🔹 Send Gmail Alert
+    email_data = {"stock": stock, "price": current_price, "decision": decision}
+    requests.post(gmail_webhook, json=email_data)
+    print("📩 Email Alert Sent Successfully!")
+
+    # 🔹 Send WhatsApp Alert
+    client = Client(twilio_sid, twilio_auth)
+    whatsapp_message = f"Stock Alert for {stock}\n{decision}\nCurrent Price: ${round(current_price, 2)}"
+    client.messages.create(from_="whatsapp:+14155238886", body=whatsapp_message, to=whatsapp_number)
+    print("📲 WhatsApp Alert Sent Successfully!")
+
+# 🔹 Run Once Before Scheduling
+for stock in stocks:
+    fetch_and_analyze_stock(stock)  # ✅ Runs immediately
+
+# 🔹 Schedule Next Run at 9:00 AM
+schedule.every().day.at("09:00").do(lambda: [fetch_and_analyze_stock(stock) for stock in stocks])
+
+# 🔹 Run and Check Every 60 Seconds
+while True:
+    schedule.run_pending()
+    time.sleep(60)  # ✅ Prevents high CPU usage
